@@ -221,6 +221,17 @@ int net_device_table_mgr::map_net_devices()
 			continue;
 		}
 
+		// only support mlx5 device
+		if(strncmp(ib_ctx->get_ibv_device()->name, "mlx5", 4) != 0) {
+			ndtm_logdbg("Blocking offload: non-mlx5 interfaces ('%s')", ifa->ifa_name);
+
+			// Close the cma_id which will not be offload
+			IF_RDMACM_FAILURE(rdma_destroy_id(cma_id)) {
+				ndtm_logerr("Failed in rdma_destroy_id (errno=%d %m)", errno);
+			} ENDIF_RDMACM_FAILURE;
+			continue;
+		}
+
 		if ((!safe_mce_sys().enable_ipoib) && (get_iftype_from_ifname(ifa->ifa_name) == ARPHRD_INFINIBAND)) {
 			ndtm_logdbg("Blocking offload: IPoIB interfaces ('%s')", ifa->ifa_name);
 
