@@ -253,6 +253,11 @@ void ring_simple::create_resources(ring_resource_creation_info_t* p_ring_info, b
 		ring_logpanic("p_ring_info.p_ib_ctx = NULL. It can be related to wrong bonding configuration");
 	}
 
+	ring_logdbg("ring info: if_name = %s", p_ring_info->if_name);
+	ring_logdbg("ring info: l2_addr = %s", p_ring_info->p_l2_addr->to_str().c_str());
+	ring_logdbg("ring info: ib_name = %s", p_ring_info->p_ib_ctx->get_ibv_device()->name);
+	ring_logdbg("ring info: port    = %d", p_ring_info->port_num);
+
 	save_l2_address(p_ring_info->p_l2_addr);
 	m_p_tx_comp_event_channel = ibv_create_comp_channel(m_p_ib_ctx->get_ibv_context());
 	if (m_p_tx_comp_event_channel == NULL) {
@@ -272,12 +277,33 @@ void ring_simple::create_resources(ring_resource_creation_info_t* p_ring_info, b
 			max_qp_wr, SYS_VAR_TX_NUM_WRE, m_tx_num_wr);
 		m_tx_num_wr = max_qp_wr;
 	}
+	ring_logdbg("ring attributes: m_tx_num_wr = %d", m_tx_num_wr);
 
 	m_tx_num_wr_free = m_tx_num_wr;
+
+	memset(&m_tso, 0, sizeof(m_tso));
+	if (safe_mce_sys().enable_tso && (0 != check_tso_from_ifname(p_ring_info->if_name))) {
+#ifdef HAVE_TSO
+		vma_ibv_device_attr* r_ibv_dev_attr = m_p_ib_ctx->get_ibv_device_attr();
+		if (r_ibv_dev_attr->comp_mask & IBV_EXP_DEVICE_ATTR_TSO_CAPS) {
+			const struct ibv_exp_tso_caps *caps = &r_ibv_dev_attr->tso_caps;
+			if (ibv_is_qpt_supported(caps->supported_qpts, IBV_QPT_RAW_PACKET) ||
+				ibv_is_qpt_supported(caps->supported_qpts, IBV_QPT_UD)) {
+				m_tso.max_payload_sz = caps->max_tso;
+				/* ETH(14) + IP(20) + TCP(20) + TCP OPTIONS(40) */
+				m_tso.max_header_sz = 94;
+			}
+		}
+#endif /* HAVE_TSO */
+	}
+	ring_logdbg("ring attributes: m_tso = %d", is_tso());
+	ring_logdbg("ring attributes: m_tso:max_payload_sz = %d", get_max_payload_sz());
+	ring_logdbg("ring attributes: m_tso:max_header_sz = %d", get_max_header_sz());
 
 	memset(&m_cq_moderation_info, 0, sizeof(m_cq_moderation_info));
 
 	m_flow_tag_enabled = m_p_ib_ctx->get_flow_tag_capability();
+	ring_logdbg("ring attributes: m_flow_tag_enabled = %d", m_flow_tag_enabled);
 
 	m_p_rx_comp_event_channel = ibv_create_comp_channel(m_p_ib_ctx->get_ibv_context()); // ODED TODO: Adjust the ibv_context to be the exact one in case of different devices
 	BULLSEYE_EXCLUDE_BLOCK_START
@@ -1525,11 +1551,6 @@ int ring_simple::mem_buf_tx_release(mem_buf_desc_t* p_mem_buf_desc_list, bool b_
 	return accounting;
 }
 
-int ring_simple::get_max_tx_inline()
-{
-	return m_p_qp_mgr->get_max_inline_tx_data();
-}
-
 /* note that this function is inline, so keep it above the functions using it */
 inline int ring_simple::send_buffer(vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr)
 {
@@ -1565,19 +1586,14 @@ void ring_simple::send_ring_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wq
 {
 	NOT_IN_USE(id);
 	auto_unlocker lock(m_lock_ring_tx);
-	p_send_wqe->sg_list[0].lkey = m_tx_lkey;	// The ring keeps track of the current device lkey (In case of bonding event...)
 	int ret = send_buffer(p_send_wqe, attr);
 	send_status_handler(ret, p_send_wqe);
 }
 
-void ring_simple::send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, bool b_block)
+void ring_simple::send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr)
 {
 	NOT_IN_USE(id);
 	auto_unlocker lock(m_lock_ring_tx);
-	p_send_wqe->sg_list[0].lkey = m_tx_lkey; // The ring keeps track of the current device lkey (In case of bonding event...)
-	mem_buf_desc_t* p_mem_buf_desc = (mem_buf_desc_t*)(p_send_wqe->wr_id);
-	p_mem_buf_desc->lwip_pbuf.pbuf.ref++;
-	vma_wr_tx_packet_attr attr = (vma_wr_tx_packet_attr)((b_block*VMA_TX_PACKET_BLOCK)|VMA_TX_PACKET_L3_CSUM|VMA_TX_PACKET_L4_CSUM);
 	int ret = send_buffer(p_send_wqe, attr);
 	send_status_handler(ret, p_send_wqe);
 }
@@ -1997,4 +2013,35 @@ int ring_simple::modify_ratelimit(const uint32_t ratelimit_kbps) {
 		return m_p_qp_mgr->modify_qp_ratelimit(ratelimit_kbps);
 	}
 	return 0;
+}
+
+uint32_t ring_simple::get_tx_lkey(ring_user_id_t id)
+{
+	NOT_IN_USE(id);
+	return m_tx_lkey;
+}
+
+uint32_t ring_simple::get_max_inline_data()
+{
+	return m_p_qp_mgr->get_max_inline_data();
+}
+
+uint32_t ring_simple::get_max_send_sge(void)
+{
+	return m_p_qp_mgr->get_max_send_sge();
+}
+
+uint32_t ring_simple::get_max_payload_sz(void)
+{
+	return m_tso.max_payload_sz;
+}
+
+uint16_t ring_simple::get_max_header_sz(void)
+{
+	return m_tso.max_header_sz;
+}
+
+bool ring_simple::is_tso(void)
+{
+	return (m_tso.max_payload_sz && m_tso.max_header_sz);
 }

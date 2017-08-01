@@ -71,7 +71,8 @@ ring(count, mtu), m_lock_ring_rx("ring_bond:lock_rx"), m_lock_ring_tx("ring_bond
 	m_parent = this;
 	m_type = type;
 	m_xmit_hash_policy = bond_xmit_hash_policy;
-	m_min_devices_tx_inline = -1;
+	m_max_inline_data = 0;
+	m_max_send_sge = 0;
 }
 
 void ring_bond::free_ring_bond_resources()
@@ -232,13 +233,13 @@ void ring_bond::send_ring_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe,
 	}
 }
 
-void ring_bond::send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, bool b_block)
+void ring_bond::send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr)
 {
 	mem_buf_desc_t* p_mem_buf_desc = (mem_buf_desc_t*)(p_send_wqe->wr_id);
 	ring_simple* active_ring = m_active_rings[id];
 
 	if (likely(active_ring && p_mem_buf_desc->p_desc_owner == active_ring)) {
-		active_ring->send_lwip_buffer(id, p_send_wqe, b_block);
+		active_ring->send_lwip_buffer(id, p_send_wqe, attr);
 	} else {
 		ring_logfunc("active ring=%p, silent packet drop (%p), (HA event?)", active_ring, p_mem_buf_desc);
 		p_mem_buf_desc->p_next_desc = NULL;
@@ -264,11 +265,6 @@ bool ring_bond::get_hw_dummy_send_support(ring_user_id_t id, vma_ibv_send_wr* p_
 			return false;
 		}
 	}
-}
-
-int ring_bond::get_max_tx_inline()
-{
-	return m_min_devices_tx_inline;
 }
 
 int ring_bond::poll_and_process_element_rx(uint64_t* p_cq_poll_sn, void* pv_fd_ready_array /*NULL*/) {
@@ -511,10 +507,13 @@ void ring_bond_eth::create_slave_list(in_addr_t local_if, ring_resource_creation
 {
 	for (uint32_t i = 0; i < m_n_num_resources; i++) {
 		m_bond_rings[i] = new ring_eth(local_if, &p_ring_info[i], 1, active_slaves[i], vlan, m_mtu, this);
-		if (m_min_devices_tx_inline < 0)
-			m_min_devices_tx_inline = m_bond_rings[i]->get_max_tx_inline();
-		else
-			m_min_devices_tx_inline = min(m_min_devices_tx_inline, m_bond_rings[i]->get_max_tx_inline());
+		if (0 == i) {
+			m_max_inline_data = m_bond_rings[i]->get_max_inline_data();
+			m_max_send_sge = m_bond_rings[i]->get_max_send_sge();
+		} else {
+			m_max_inline_data = min(m_max_inline_data, m_bond_rings[i]->get_max_inline_data());
+			m_max_send_sge = min(m_max_send_sge, m_bond_rings[i]->get_max_send_sge());
+		}
 		if (active_slaves[i]) {
 			m_active_rings[i] = m_bond_rings[i];
 		} else {
@@ -527,11 +526,14 @@ void ring_bond_eth::create_slave_list(in_addr_t local_if, ring_resource_creation
 void ring_bond_ib::create_slave_list(in_addr_t local_if, ring_resource_creation_info_t* p_ring_info, bool active_slaves[], uint16_t pkey)
 {
 	for (uint32_t i = 0; i < m_n_num_resources; i++) {
-		m_bond_rings[i] = new ring_ib(local_if, &p_ring_info[i], 1, active_slaves[i], pkey, m_mtu, this); // m_mtu is the value from ifconfig when ring created. Now passing it to its slaves. could have sent 0 here, as the MTU of the bond is already on the bond
-		if (m_min_devices_tx_inline < 0)
-			m_min_devices_tx_inline = m_bond_rings[i]->get_max_tx_inline();
-		else
-			m_min_devices_tx_inline = min(m_min_devices_tx_inline, m_bond_rings[i]->get_max_tx_inline());
+		m_bond_rings[i] = new ring_ib(local_if, &p_ring_info[i], 1, active_slaves[i], pkey, m_mtu, this); // get_mtu() reads the MTU from ifconfig when created. Now passing it to its slaves. could have sent 0 here, as the MTU of the bond is already on the bond
+		if (0 == i) {
+			m_max_inline_data = m_bond_rings[i]->get_max_inline_data();
+			m_max_send_sge = m_bond_rings[i]->get_max_send_sge();
+		} else {
+			m_max_inline_data = min(m_max_inline_data, m_bond_rings[i]->get_max_inline_data());
+			m_max_send_sge = min(m_max_send_sge, m_bond_rings[i]->get_max_send_sge());
+		}
 		if (active_slaves[i]) {
 			m_active_rings[i] = m_bond_rings[i];
 		} else {
@@ -655,6 +657,36 @@ bool ring_bond::is_ratelimit_supported(uint32_t rate)
 		}
 	}
 	return true;
+}
+
+uint32_t ring_bond::get_tx_lkey(ring_user_id_t id)
+{
+	return (m_active_rings[id] ? m_active_rings[id]->get_tx_lkey(id) : 0);
+}
+
+uint32_t ring_bond::get_max_inline_data()
+{
+	return m_max_inline_data;
+}
+
+uint32_t ring_bond::get_max_send_sge(void)
+{
+	return m_max_send_sge;
+}
+
+uint32_t ring_bond::get_max_payload_sz(void)
+{
+	return 0;
+}
+
+uint16_t ring_bond::get_max_header_sz(void)
+{
+	return 0;
+}
+
+bool ring_bond::is_tso(void)
+{
+	return false;
 }
 
 #ifdef DEFINED_VMAPOLL	

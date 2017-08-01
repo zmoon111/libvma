@@ -62,7 +62,6 @@ public:
 	virtual void		mem_buf_desc_completion_with_error_tx(mem_buf_desc_t* p_tx_wc_buf_desc); // Assume locked...
 	virtual void		mem_buf_desc_return_to_owner_rx(mem_buf_desc_t* p_mem_buf_desc, void* pv_fd_ready_array = NULL);
 	virtual void		mem_buf_desc_return_to_owner_tx(mem_buf_desc_t* p_mem_buf_desc);
-	virtual int		get_max_tx_inline();
 	inline int		send_buffer(vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr);
 	virtual bool		attach_flow(flow_tuple& flow_spec_5t, pkt_rcvr_sink* sink);
 	virtual bool		detach_flow(flow_tuple& flow_spec_5t, pkt_rcvr_sink* sink);
@@ -74,7 +73,7 @@ public:
 	virtual int		mem_buf_tx_release(mem_buf_desc_t* p_mem_buf_desc_list, bool b_accounting, bool trylock = false);
 	virtual void		inc_tx_retransmissions(ring_user_id_t id);
 	virtual void		send_ring_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr);
-	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, bool b_block);
+	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr);
 	virtual void		mem_buf_desc_return_single_to_owner_tx(mem_buf_desc_t* p_mem_buf_desc);
 	virtual bool		is_member(mem_buf_desc_owner* rng);
 	virtual bool		is_active_member(mem_buf_desc_owner* rng, ring_user_id_t id);
@@ -85,6 +84,12 @@ public:
 	inline void 		convert_hw_time_to_system_time(uint64_t hwtime, struct timespec* systime) { m_p_cq_mgr_rx->convert_hw_time_to_system_time(hwtime, systime); }
 	inline uint32_t		get_qpn() const { return (m_p_l2_addr ? ((IPoIB_addr *)m_p_l2_addr)->get_qpn() : 0); }
 	virtual int 		modify_ratelimit(const uint32_t ratelimit_kbps);
+	virtual uint32_t    get_tx_lkey(ring_user_id_t);
+	virtual uint32_t    get_max_inline_data();
+	virtual uint32_t    get_max_send_sge(void);
+	virtual uint32_t    get_max_payload_sz(void);
+	virtual uint16_t    get_max_header_sz(void);
+	virtual bool        is_tso(void);
 
 	struct ibv_comp_channel* get_tx_comp_event_channel() { return m_p_tx_comp_event_channel; }
 	friend class cq_mgr;
@@ -113,6 +118,7 @@ protected:
 	void			flow_tcp_del_all();
 	bool			request_more_tx_buffers(uint32_t count);
 	uint32_t		get_tx_num_wr() { return m_tx_num_wr; }
+	void			set_tx_num_wr(int32_t num_wr) { m_tx_num_wr = m_tx_num_wr_free = num_wr; }
 	uint16_t		get_partition() { return m_partition; }
 	ib_ctx_handler*		m_p_ib_ctx;
 	qp_mgr*			m_p_qp_mgr;
@@ -121,6 +127,7 @@ protected:
 	lock_spin_recursive	m_lock_ring_rx;
 	bool			m_b_is_hypervisor;
 	ring_stats_t*		m_p_ring_stat;
+
 private:
 	inline void		send_status_handler(int ret, vma_ibv_send_wr* p_send_wqe);
 	inline mem_buf_desc_t*	get_tx_buffers(uint32_t n_num_mem_bufs);
@@ -165,6 +172,14 @@ private:
 	mem_buf_desc_t*		m_rx_buffs_rdy_for_free_tail;
 #endif // DEFINED_VMAPOLL		
 	bool			m_flow_tag_enabled;
+
+	struct {
+		/* Maximum length of TCP payload for TSO */
+		uint32_t max_payload_sz;
+
+		/* Maximum length of header for TSO */
+		uint16_t max_header_sz;
+	} m_tso;
 };
 
 class ring_eth : public ring_simple

@@ -56,6 +56,11 @@
 #include "header.h"
 #include "ip_address.h"
 
+typedef struct {
+	vma_wr_tx_packet_attr flags;
+	uint16_t mss;
+} vma_send_attr;
+
 class dst_entry : public cache_observer, public tostr, public neigh_observer
 {
 
@@ -66,8 +71,10 @@ public:
 	virtual void 	notify_cb();
 
 	virtual bool 	prepare_to_send(const int ratelimit_kbps, bool skip_rules=false, bool is_connect=false);
-	virtual ssize_t slow_send(const iovec* p_iov, size_t sz_iov, bool is_dummy, const int ratelimit_kbps, bool b_blocked = true, bool is_rexmit = false, int flags = 0, socket_fd_api* sock = 0, tx_call_t call_type = TX_UNDEF) = 0 ;
-	virtual ssize_t fast_send(const iovec* p_iov, const ssize_t sz_iov, bool is_dummy, bool b_blocked = true, bool is_rexmit = false) = 0;
+	virtual ssize_t slow_send(const iovec* p_iov, size_t sz_iov, const int ratelimit_kbps,
+			vma_send_attr attr, int flags = 0,
+			socket_fd_api* sock = 0, tx_call_t call_type = TX_UNDEF) = 0;
+	virtual ssize_t fast_send(const iovec* p_iov, const ssize_t sz_iov, vma_send_attr attr) = 0;
 
 	bool		try_migrate_ring(lock_base& socket_lock);
 
@@ -97,6 +104,9 @@ public:
 
 	void	return_buffers_pool();
 	int	get_route_mtu();
+	ring*	get_ring() const {
+		return m_p_ring;
+	}
 
 protected:
 	ip_address 		m_dst_ip;
@@ -112,8 +122,7 @@ protected:
 	vma_ibv_send_wr 	m_not_inline_send_wqe;
 	vma_ibv_send_wr 	m_fragmented_send_wqe;
 	wqe_send_handler*	m_p_send_wqe_handler;
-	ibv_sge 		m_sge[MCE_DEFAULT_TX_NUM_SGE];
-	uint8_t 		m_num_sge;
+	ibv_sge 		*m_sge;
 	route_entry*		m_p_rt_entry;
 	route_val*		m_p_rt_val;
 	net_device_entry*	m_p_net_dev_entry;

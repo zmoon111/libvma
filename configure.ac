@@ -97,6 +97,8 @@ AC_CHECK_HEADERS([infiniband/verbs.h], ,
 AC_CHECK_HEADERS([rdma/rdma_cma.h], ,
                  [AC_MSG_ERROR([Unable to find the librdmacm-devel header files])])
 
+AC_CHECK_HEADERS([linux/ethtool.h])
+
 #
 # Chech if infiniband/mlx5_hw.h can be used
 #
@@ -773,6 +775,22 @@ AC_TRY_LINK(
 [
   AC_MSG_RESULT([yes])
   AC_DEFINE(DEFINED_IBV_EXP_QP_INIT_ATTR_ASSOCIATED_QPN, 1, [Define to 1 if IBV_EXP_QP_INIT_ATTR_ASSOCIATED_QPN is defined])
+],
+[
+  AC_MSG_RESULT([no])
+])
+
+AC_MSG_CHECKING([if IBV_EXP_DEVICE_ATTR_TSO_CAPS is defined])
+AC_TRY_LINK(
+#include <infiniband/verbs_exp.h>
+,
+[
+  int access = (int)IBV_EXP_DEVICE_ATTR_TSO_CAPS;
+  access = access;
+],
+[
+  AC_MSG_RESULT([yes])
+  AC_DEFINE(HAVE_TSO, 1, [Define to 1 if IBV_EXP_DEVICE_ATTR_TSO_CAPS is defined])
 ],
 [
   AC_MSG_RESULT([no])

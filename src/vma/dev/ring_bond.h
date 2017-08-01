@@ -51,7 +51,6 @@ public:
 	virtual void		mem_buf_desc_completion_with_error_tx(mem_buf_desc_t* p_tx_wc_buf_desc); // Assume locked...
 	virtual void		mem_buf_desc_return_to_owner_rx(mem_buf_desc_t* p_mem_buf_desc, void* pv_fd_ready_array = NULL);
 	virtual void		mem_buf_desc_return_to_owner_tx(mem_buf_desc_t* p_mem_buf_desc);
-	virtual int		get_max_tx_inline();
 	virtual bool		attach_flow(flow_tuple& flow_spec_5t, pkt_rcvr_sink* sink);
 	virtual bool		detach_flow(flow_tuple& flow_spec_5t, pkt_rcvr_sink* sink);
 	virtual void		restart(ring_resource_creation_info_t* p_ring_info);
@@ -59,7 +58,7 @@ public:
 	virtual int		mem_buf_tx_release(mem_buf_desc_t* p_mem_buf_desc_list, bool b_accounting, bool trylock = false);
 	virtual void		inc_tx_retransmissions(ring_user_id_t id);
 	virtual void		send_ring_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr);
-	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, bool b_block);
+	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr);
 	virtual void		mem_buf_desc_return_single_to_owner_tx(mem_buf_desc_t* p_mem_buf_desc);
 	virtual bool		is_member(mem_buf_desc_owner* rng);
 	virtual bool		is_active_member(mem_buf_desc_owner* rng, ring_user_id_t id);
@@ -67,7 +66,13 @@ public:
 	virtual ring_user_id_t	generate_id(const address_t src_mac, const address_t dst_mac, uint16_t eth_proto, uint16_t encap_proto, uint32_t src_ip, uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
 	virtual bool 		get_hw_dummy_send_support(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe);
 	virtual int 		modify_ratelimit(const uint32_t ratelimit_kbps);
-	virtual bool		is_ratelimit_supported(uint32_t rate);
+	virtual uint32_t    get_tx_lkey(ring_user_id_t);
+	virtual uint32_t    get_max_inline_data();
+	virtual uint32_t    get_max_send_sge(void);
+	virtual uint32_t    get_max_payload_sz(void);
+	virtual uint16_t    get_max_header_sz(void);
+	virtual bool        is_tso(void);
+	virtual bool        is_ratelimit_supported(uint32_t rate);
 #ifdef DEFINED_VMAPOLL		
 	virtual int		fast_poll_and_process_element_rx(vma_packets_t *vma_pkts);
 	int 			vma_poll(struct vma_completion_t *vma_completions, unsigned int ncompletions, int flags);
@@ -79,7 +84,8 @@ protected:
 	ring_simple**		m_bond_rings;
 	ring_simple**		m_active_rings;
 
-	int			m_min_devices_tx_inline;
+	uint32_t    m_max_inline_data;
+	uint32_t    m_max_send_sge;
 
 private:
 	void			devide_buffers_helper(descq_t *rx_reuse, descq_t *buffer_per_ring);

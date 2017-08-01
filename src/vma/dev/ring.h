@@ -221,10 +221,11 @@ typedef hash_map<flow_spec_tcp_key_t, rfs*> flow_spec_tcp_map_t;
 
 
 typedef struct {
-	ib_ctx_handler*	p_ib_ctx;
-	uint8_t 	port_num;
-	L2_address* 	p_l2_addr;
-	bool			active;
+	char            if_name[IFNAMSIZ];
+	ib_ctx_handler* p_ib_ctx;
+	L2_address*     p_l2_addr;
+	uint8_t         port_num;
+	bool            active;
 } ring_resource_creation_info_t;
 
 
@@ -295,13 +296,12 @@ public:
 	virtual mem_buf_desc_t*	mem_buf_tx_get(ring_user_id_t id, bool b_block, int n_num_mem_bufs = 1) = 0;
 	virtual int		mem_buf_tx_release(mem_buf_desc_t* p_mem_buf_desc_list, bool b_accounting, bool trylock = false) = 0;
 	virtual void		send_ring_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr) = 0;
-	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, bool b_block) = 0;
+	virtual void		send_lwip_buffer(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe, vma_wr_tx_packet_attr attr) = 0;
 
 	// Funcs taken from cq_mgr.h
 	int			get_num_resources() const { return m_n_num_resources; };
 	int*			get_rx_channel_fds() const { return m_p_n_rx_channel_fds; };
 	int			get_rx_channel_fds_index(uint32_t index) const;
-	virtual int		get_max_tx_inline() = 0;
 	virtual bool 		get_hw_dummy_send_support(ring_user_id_t id, vma_ibv_send_wr* p_send_wqe) = 0;
 	virtual int		request_notification(cq_type_t cq_type, uint64_t poll_sn) = 0;
 	virtual bool		reclaim_recv_buffers(descq_t *rx_reuse) = 0;
@@ -326,6 +326,12 @@ public:
 	bool			is_mp_ring() {return m_is_mp_ring;};
 	virtual int		modify_ratelimit(const uint32_t ratelimit_kbps) = 0;
 	virtual bool		is_ratelimit_supported(uint32_t rate) = 0;
+	virtual uint32_t    get_tx_lkey(ring_user_id_t) = 0;
+	virtual uint32_t    get_max_inline_data() = 0;
+	virtual uint32_t    get_max_send_sge(void) = 0;
+	virtual uint32_t    get_max_payload_sz(void) = 0;
+	virtual uint16_t    get_max_header_sz(void) = 0;
+	virtual bool        is_tso(void) = 0;
 
 #ifdef DEFINED_VMAPOLL		
 	virtual int		vma_poll(struct vma_completion_t *vma_completions, unsigned int ncompletions, int flags) = 0;
